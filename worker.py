@@ -14,7 +14,7 @@ notion = Client(auth=NOTION_TOKEN)
 
 ALLOWED_ACTIONS = {"run_script", "call_api", "codex_apply"}
 ALLOWED_SCRIPTS = {"build.sh", "sync_data.sh"}
-ALLOWED_URLS = {"https://example.com/hook"}
+ALLOWED_URLS = {"https://httpbin.org/post"}
 
 def set_status(page_id, status, logs=None):
     log(f"set_status({page_id}, {status})")
