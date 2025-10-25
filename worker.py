@@ -91,18 +91,20 @@ def handle_task(page):
         set_status(page_id, "Failed", f"Action '{action}' not allowed"); return
 
     def set_status(page_id, status, logs=None):
-        # 1) меняем статус
+        # 1) меняем статус (это уже работает)
         props = {"Status": {"select": {"name": status}}}
-        # 2) пишем лог в колонку Logs (rich_text), если колонка есть
         if logs:
             props["Logs"] = {
                 "rich_text": [
                     {"type": "text", "text": {"content": str(logs)[:1800]}}
                 ]
             }
-        notion.pages.update(page_id=page_id, properties=props)
+        try:
+            notion.pages.update(page_id=page_id, properties=props)
+        except Exception as e:
+            print(f"[ERR] pages.update (status+Logs) failed: {e}")
 
-        # 3) дублируем лог как блок внутри страницы (удобно для длинных логов)
+        # 2) продублируем лог как блок внутри страницы — вдруг свойство не совпадает
         if logs:
             try:
                 notion.blocks.children.append(
@@ -110,14 +112,13 @@ def handle_task(page):
                     children=[{
                         "object": "block",
                         "type": "paragraph",
-                        "paragraph": {
-                            "rich_text": [{"type": "text", "text": {"content": str(logs)[:1800]}}]
-                        }
+                        "paragraph": {"rich_text": [
+                            {"type": "text", "text": {"content": str(logs)[:1800]}}
+                        ]}
                     }]
                 )
             except Exception as e:
-                # не падаем из-за блоков, статус уже обновлён
-                pass
+                print(f"[WARN] blocks.append failed: {e}")
 
 def main():
     tasks = fetch_ready_tasks()
