@@ -1,18 +1,35 @@
 name: Notion Task Runner
 on:
   schedule:
-    - cron: "*/5 * * * *"   # запуск каждые 5 минут
+    - cron: "*/5 * * * *"   # каждые 5 минут
   workflow_dispatch: {}      # ручной запуск из вкладки Actions
+
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
-      - env:
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      # --- (опционально) если используешь действие codex_apply ---
+      # - name: Install Codex CLI
+      #   run: |
+      #     curl -fsSL https://get.openai.com/codex/install.sh | bash
+      #     echo "$CODEX_TOKEN" | codex auth login --token-stdin
+      #   env:
+      #     CODEX_TOKEN: ${{ secrets.CODEX_TOKEN }}
+      # -----------------------------------------------------------
+
+      - name: Run worker
+        env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         run: python worker.py
