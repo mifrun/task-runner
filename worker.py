@@ -90,23 +90,34 @@ def handle_task(page):
     if action not in ALLOWED_ACTIONS:
         set_status(page_id, "Failed", f"Action '{action}' not allowed"); return
 
-    set_status(page_id, "Running")
-    try:
-        if action == "run_script":
-            code, out = safe_run(payload.get("cmd"))
-        elif action == "call_api":
-            code, out = call_api(payload)
-        elif action == "codex_apply":
-            code, out = codex_apply(payload)
-        else:
-            raise RuntimeError("Unknown action")
+    def set_status(page_id, status, logs=None):
+        # 1) меняем статус
+        props = {"Status": {"select": {"name": status}}}
+        # 2) пишем лог в колонку Logs (rich_text), если колонка есть
+        if logs:
+            props["Logs"] = {
+                "rich_text": [
+                    {"type": "text", "text": {"content": str(logs)[:1800]}}
+                ]
+            }
+        notion.pages.update(page_id=page_id, properties=props)
 
-        if (isinstance(code,int) and code == 0) or (isinstance(code,int) and 200 <= code < 300):
-            set_status(page_id, "Done", out)
-        else:
-            set_status(page_id, "Failed", out)
-    except Exception as e:
-        set_status(page_id, "Failed", f"Error: {e}")
+        # 3) дублируем лог как блок внутри страницы (удобно для длинных логов)
+        if logs:
+            try:
+                notion.blocks.children.append(
+                    block_id=page_id,
+                    children=[{
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [{"type": "text", "text": {"content": str(logs)[:1800]}}]
+                        }
+                    }]
+                )
+            except Exception as e:
+                # не падаем из-за блоков, статус уже обновлён
+                pass
 
 def main():
     tasks = fetch_ready_tasks()
