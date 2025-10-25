@@ -91,39 +91,43 @@ def handle_task(page):
         set_status(page_id, "Failed", f"Action '{action}' not allowed"); return
 
     def set_status(page_id, status, logs=None):
-        # 1) меняем статус (это уже работает)
+        snippet = (str(logs)[:1800] if logs else None)
+
+        # 1) Обновляем свойства страницы
         props = {"Status": {"select": {"name": status}}}
-        if logs:
-            props["Logs"] = {
-                "rich_text": [
-                    {"type": "text", "text": {"content": str(logs)[:1800]}}
-                ]
-            }
-            props["LogsPlain"] = {
-                "rich_text": [
-                    {"type": "text", "text": {"content": str(logs)[:1800]}}
-                ]
-            }
+        if snippet:
+            props["Logs"] = {"rich_text": [{"type": "text", "text": {"content": snippet}}]}
+            props["LogsPlain"] = {"rich_text": [{"type": "text", "text": {"content": snippet}}]}
         try:
             notion.pages.update(page_id=page_id, properties=props)
         except Exception as e:
-            print(f"[ERR] pages.update (status+Logs) failed: {e}")
+            print(f"[ERR] pages.update failed: {e}")
 
-        # 2) продублируем лог как блок внутри страницы — вдруг свойство не совпадает
-        if logs:
+        # 2) Дублируем как блок (чтобы лог всегда был виден внутри карточки)
+        if snippet:
             try:
                 notion.blocks.children.append(
                     block_id=page_id,
                     children=[{
                         "object": "block",
                         "type": "paragraph",
-                        "paragraph": {"rich_text": [
-                            {"type": "text", "text": {"content": str(logs)[:1800]}}
-                        ]}
+                        "paragraph": {"rich_text": [{"type": "text", "text": {"content": snippet}}]}
                     }]
                 )
             except Exception as e:
                 print(f"[WARN] blocks.append failed: {e}")
+
+        # 3) Верификация: читаем страницу и печатаем, что реально в свойствах
+        try:
+            page = notion.pages.retrieve(page_id=page_id)
+            logs_prop = page["properties"].get("Logs", {})
+            logsplain_prop = page["properties"].get("LogsPlain", {})
+            lp = "".join([rt["plain_text"] for rt in logs_prop.get("rich_text", [])]) if logs_prop else ""
+            lpp = "".join([rt["plain_text"] for rt in logsplain_prop.get("rich_text", [])]) if logsplain_prop else ""
+            print(f"[VERIFY] Logs.len={len(lp)} LogsPlain.len={len(lpp)}")
+        except Exception as e:
+            print(f"[WARN] verify retrieve failed: {e}")
+
 
 def debug_dump_db_schema():
     try:
