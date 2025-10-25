@@ -99,6 +99,11 @@ def handle_task(page):
                     {"type": "text", "text": {"content": str(logs)[:1800]}}
                 ]
             }
+            props["LogsPlain"] = {
+                "rich_text": [
+                    {"type": "text", "text": {"content": str(logs)[:1800]}}
+                ]
+            }
         try:
             notion.pages.update(page_id=page_id, properties=props)
         except Exception as e:
