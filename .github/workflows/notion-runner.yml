@@ -20,12 +20,12 @@ jobs:
         run: pip install -r requirements.txt
 
       # --- (опционально) если используешь действие codex_apply ---
-      # - name: Install Codex CLI
-      #   run: |
-      #     curl -fsSL https://get.openai.com/codex/install.sh | bash
-      #     echo "$CODEX_TOKEN" | codex auth login --token-stdin
-      #   env:
-      #     CODEX_TOKEN: ${{ secrets.CODEX_TOKEN }}
+      - name: Install Codex CLI
+        run: |
+          curl -fsSL https://get.openai.com/codex/install.sh | bash
+          echo "$CODEX_TOKEN" | codex auth login --token-stdin
+        env:
+          CODEX_TOKEN: ${{ secrets.CODEX_TOKEN }}
       # -----------------------------------------------------------
 
       - name: Run worker
