@@ -305,6 +305,7 @@ def process_epics():
 def main():
     print("Starting worker…")
     print(f"DB_ID: {DB_ID}")
+    print(f"OPENAI_API_KEY present: {'yes' if OPENAI_API_KEY else 'no'}")
     debug_dump_db_schema()
 
     # 1) сначала обработать эпики (если есть)
