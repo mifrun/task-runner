@@ -120,11 +120,20 @@ def handle_task(page):
             except Exception as e:
                 print(f"[WARN] blocks.append failed: {e}")
 
+def debug_dump_db_schema():
+    try:
+        db = notion.databases.retrieve(DB_ID)
+        print("=== DB PROPERTIES ===")
+        for name, meta in db.get("properties", {}).items():
+            print(f"- {name}: {meta.get('type')}")
+        print("=====================")
+    except Exception as e:
+        print(f"[WARN] debug_dump_db_schema failed: {e}")
+
 def main():
-    tasks = fetch_ready_tasks()
-    for task in tasks:
+    debug_dump_db_schema()  # временно
+    for task in fetch_ready_tasks():
         handle_task(task)
-    log("Worker finished.")
 
 if __name__ == "__main__":
     main()
