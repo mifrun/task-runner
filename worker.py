@@ -1,7 +1,10 @@
 # worker.py — Notion Task Runner + Epic → Tasks (LLM)
-# Переменные окружения: NOTION_TOKEN, NOTION_DATABASE_ID, OPENAI_API_KEY
+# Требуемые переменные окружения в GitHub Actions:
+#   NOTION_TOKEN, NOTION_DATABASE_ID, OPENAI_API_KEY
+# Требуемые пакеты в requirements.txt:
+#   notion-client==2.2.1, python-dotenv==1.0.1, requests==2.32.3, openai==1.45.0 (SDK не обязателен)
 
-import os, json, shlex, subprocess, time
+import os, json, shlex, subprocess, time, re
 from typing import Callable, List, Dict, Any
 
 from notion_client import Client
@@ -13,19 +16,11 @@ load_dotenv()
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 DB_ID = os.environ["NOTION_DATABASE_ID"]
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 notion = Client(auth=NOTION_TOKEN)
 
-# OpenAI (v1 SDK)
-try:
-    from openai import OpenAI
-    openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-except Exception:
-    openai_client = None
-
 # Белые списки
-ALLOWED_ACTIONS = {"run_script", "call_api", "codex_apply"}   # codex_apply можно временно не использовать
+ALLOWED_ACTIONS = {"run_script", "call_api", "codex_apply"}   # codex_apply сейчас отключен внутри
 ALLOWED_SCRIPTS = {"build.sh", "sync_data.sh"}                # скрипты в ./tasks
 ALLOWED_URLS = {"https://httpbin.org/post"}                   # разрешённые call_api URL
 
@@ -118,7 +113,6 @@ def safe_run(cmd: str | None):
     return proc.returncode, out
 
 def call_api(payload: dict):
-    import requests
     url = payload.get("url")
     method = (payload.get("method") or "GET").upper()
     body = payload.get("body")
@@ -130,7 +124,7 @@ def call_api(payload: dict):
     return r.status_code, text
 
 def codex_apply(payload: dict):
-    # CLI отключена — пусть фейлится с понятной причиной если вдруг попадётся
+    # CLI отключена — фейлим с понятной причиной, чтобы не висло
     raise RuntimeError("codex_apply disabled (Codex CLI not installed)")
 
 def handle_task(page: dict):
@@ -198,16 +192,16 @@ EPIC_PROMPT = """Ты — помощник по управлению задач�
 Описание эпика:
 """
 
-def llm_decompose_epic(description: str) -> list[dict]:
-    import os, json, requests
-
-    key = os.environ.get("OPENAI_API_KEY")  # читаем из env на лету
+def llm_decompose_epic(description: str) -> List[Dict[str, Any]]:
+    # читаем ключ "на лету", логируем наличие
+    key = os.environ.get("OPENAI_API_KEY")
     print("LLM: OPENAI key present:", "yes" if bool(key) else "no")
     if not key:
         raise RuntimeError("OPENAI_API_KEY not set (LLM unavailable)")
 
     prompt = EPIC_PROMPT + description.strip()
 
+    # Прямой HTTP-вызов Chat Completions
     url = "https://api.openai.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {key}",
@@ -228,8 +222,17 @@ def llm_decompose_epic(description: str) -> list[dict]:
     if not r.ok:
         raise RuntimeError(f"OpenAI API error: {r.status_code} {r.text[:400]}")
 
+    # ---- парсим ответ: срезаем ```json … ``` если LLM так вернул
+    content = r.json()["choices"][0]["message"]["content"].strip()
+    fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", content, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        content = fenced.group(1).strip()
+    else:
+        m = re.search(r"\[\s*{.*}\s*\]", content, re.DOTALL)
+        if m:
+            content = m.group(0).strip()
+
     try:
-        content = r.json()["choices"][0]["message"]["content"].strip()
         data = json.loads(content)
         if not isinstance(data, list):
             raise ValueError("Expected a JSON array")
@@ -237,7 +240,7 @@ def llm_decompose_epic(description: str) -> list[dict]:
         raise RuntimeError(f"LLM JSON parse error: {e}  RAW={content[:400]}")
 
     # валидация под allow-листы
-    tasks = []
+    tasks: List[Dict[str, Any]] = []
     p = 1
     for item in data[:25]:
         title = str(item.get("title") or "").strip()[:180]
@@ -249,23 +252,29 @@ def llm_decompose_epic(description: str) -> list[dict]:
 
         if action == "run_script":
             cmd = str(pl.get("cmd") or "build.sh")
-            if cmd not in ALLOWED_SCRIPTS: cmd = "build.sh"
+            if cmd not in ALLOWED_SCRIPTS:
+                cmd = "build.sh"
             pl = {"cmd": cmd}
         else:
             url2 = str(pl.get("url") or "https://httpbin.org/post")
-            if url2 not in ALLOWED_URLS: url2 = "https://httpbin.org/post"
+            if url2 not in ALLOWED_URLS:
+                url2 = "https://httpbin.org/post"
             method = (pl.get("method") or "POST").upper()
             body = pl.get("body") or {"ping": "ok"}
             pl = {"url": url2, "method": method, "body": body}
 
-        tasks.append({"title": title, "action": action, "payload": pl, "priority": max(1, min(999, priority))})
+        tasks.append({
+            "title": title,
+            "action": action,
+            "payload": pl,
+            "priority": max(1, min(999, priority))
+        })
         p += 1
 
     if len(tasks) < 5:
         raise RuntimeError("Too few tasks after validation")
 
     return tasks
-
 
 def create_tasks_in_notion(tasks: List[Dict[str, Any]]) -> int:
     headers = {
@@ -283,7 +292,6 @@ def create_tasks_in_notion(tasks: List[Dict[str, Any]]) -> int:
             "Payload": {"rich_text": [{"text": {"content": json.dumps(t["payload"], ensure_ascii=False)}}]},
             "Priority": {"number": t["priority"]},
         }
-        import requests
         r = requests.post(
             "https://api.notion.com/v1/pages",
             headers=headers,
@@ -306,7 +314,6 @@ def process_epics():
         if not desc:
             set_status(epic_id, "Failed", "Epic has empty Description")
             continue
-        # пометим In progress
         set_status(epic_id, "Running", "Decomposing epic into tasks...")
         try:
             tasks = llm_decompose_epic(desc)
@@ -319,7 +326,7 @@ def process_epics():
 def main():
     print("Starting worker…")
     print(f"DB_ID: {DB_ID}")
-    print(f"OPENAI_API_KEY present: {'yes' if OPENAI_API_KEY else 'no'}")
+    print(f"OPENAI_API_KEY present: {'yes' if bool(os.environ.get('OPENAI_API_KEY')) else 'no'}")
     debug_dump_db_schema()
 
     # 1) сначала обработать эпики (если есть)
